@@ -10,6 +10,8 @@
 
     let map;
     let stations = [];
+    let trips = [];
+    let departures, arrivals;
     let mapViewChanges = 0;
 
     $: map?.on("move", evt => mapViewChanges++)
@@ -74,15 +76,56 @@
         }
     }
 
+    async function loadStationDemand() {
+        try {
+            const csvUrl = 'https://vis-society.github.io/labs/8/data/bluebikes-traffic-2024-03.csv';
+            const data = await d3.csv(csvUrl);
+
+            trips = data.map(trip => {
+                return {
+                    id: trip.ride_id,
+                    name: trip.NAME,
+                    started_at: new Date(trip.started_at),
+                    ended_at: new Date(trip.ended_at),
+                    start_station_id: trip.start_station_id,
+                    end_station_id: trip.end_station_id
+                };
+            });
+            console.log("Informações das estações carregadas:", trips);
+        } catch (error) {
+            console.error("Erro ao carregar as informações das estações: ", error);
+        }
+        departures = d3.rollup(trips, v => v.length, d => d.start_station_id);
+        arrivals = d3.rollup(trips, v => v.length, d => d.end_station_id);
+    }
+
     onMount(() => {
         initMap();
         loadStationData();
+        loadStationDemand();
     });
 
     function getCoords (station) {
         let point = new mapboxgl.LngLat(+station.Long, +station.Lat);
         let {x, y} = map.project(point);
         return {cx: x, cy: y};
+    }
+    //It would be better if this was made in onMount after functions returned but i dont remmeber how to do that
+    let radiusScale;
+    $: {
+        if(arrivals && departures){
+            stations = stations.map(station => {
+                let id = station.id;
+                station.arrivals = arrivals.get(id) ?? 0;
+                station.departures = departures.get(id) ?? 0;
+                station.totalTraffic = station.arrivals + station.departures;
+                return station;
+            });
+            radiusScale = d3.scaleSqrt()
+                .domain([0, d3.max(stations, d => d.totalTraffic) || 0])
+                .range([0, 20]);
+            console.log("Processed stations: ", stations);
+        }
     }
 
 
@@ -96,8 +139,10 @@
     {#key mapViewChanges}
         {#each stations as station}
             <circle {...getCoords(station)}
-                    r="4"
-                    fill="#eff319be" />
+                    r="{radiusScale ? radiusScale(station.totalTraffic): 5}"
+                    fill="#eff319be"
+                    stroke="#a5a500"
+                    stroke-width="1"/>
         {/each}
     {/key}
     </svg>
